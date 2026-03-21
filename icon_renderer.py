@@ -48,6 +48,7 @@ _ORANGE = "#FFAA00"
 _RED    = "#FF5555"
 _GREY   = "#999999"
 _WHITE  = "#CCCCCC"
+_PINK   = "#FF8888"
 
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont:
@@ -80,7 +81,7 @@ def _draw_centered(
         bbox = draw.textbbox((0, 0), text, font=font)
         w = bbox[2] - bbox[0]
         h = bbox[3] - bbox[1]
-        draw.text((cx - w // 2, cy - h // 2), text, fill=fill, font=font)
+        draw.text((cx - w // 2 - bbox[0], cy - h // 2 - bbox[1]), text, fill=fill, font=font)
     except AttributeError:
         try:
             w, h = draw.textsize(text, font=font)  # type: ignore[attr-defined]
@@ -102,17 +103,18 @@ def render_icon(
     img  = Image.new("RGBA", (sz, sz), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
+    # -- Relogin state (checked before the None guard so it always wins) --
+    if status == "relogin":
+        draw.rectangle([0, 0, sz - 1, sz - 1], fill=_BG_RELOGIN)
+        font = _load_font(52)
+        _draw_centered(draw, sz // 2, sz // 2, "!!", _PINK, font)
+        return img.resize((_OUT, _OUT), Image.LANCZOS)
+
     # -- Error / unknown states --
     if status in ("no_token", "error", "ratelimit") or five_hour is None:
         draw.rectangle([0, 0, sz - 1, sz - 1], fill=_BG_GREY)
         font = _load_font(64)
         _draw_centered(draw, sz // 2, sz // 2, "?", _WHITE, font)
-        return img.resize((_OUT, _OUT), Image.LANCZOS)
-
-    if status == "relogin":
-        draw.rectangle([0, 0, sz - 1, sz - 1], fill=_BG_RELOGIN)
-        font = _load_font(52)
-        _draw_centered(draw, sz // 2, sz // 2, "!!", "#FF8888", font)
         return img.resize((_OUT, _OUT), Image.LANCZOS)
 
     # -- Normal / stale rendering --

@@ -18,6 +18,12 @@ def test_error_state_returns_image():
     assert img.size == (64, 64)
 
 
+def test_relogin_state_returns_image():
+    img = icon_renderer.render_icon(None, None, status="relogin")
+    assert img.size == (64, 64)
+    assert img.mode == "RGBA"
+
+
 def test_ok_background_is_dark():
     """Normal state: background should be near #1a1a1a (dark, not colored)."""
     img = icon_renderer.render_icon(20.0, 50.0, status="ok")
