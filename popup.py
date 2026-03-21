@@ -6,35 +6,62 @@ SettingsWindow – modal settings sheet
 
 from __future__ import annotations
 
+import threading
 import tkinter as tk
 import tkinter.messagebox
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
+import win32_ui
 from api import UsageData
 from config import Settings, get_startup_enabled, save_settings, set_startup_enabled
 
-# ── Palette (matches macOS native popover) ────────────────────────────────────
-BG       = "#FFFFFF"   # popover / card background
-BG_SEC   = "#F2F2F7"   # section bg, hover highlight, entry bg
-FG       = "#1C1C1E"   # primary text  (macOS label)
-FG_DIM   = "#8E8E93"   # secondary text (macOS secondaryLabel)
-DIVIDER  = "#E5E5EA"   # hairline rule
-BORDER   = "#C6C6C8"   # 1-px window border
-GREEN    = "#34C759"   # macOS systemGreen
-ORANGE   = "#FF9500"   # macOS systemOrange
-RED      = "#FF3B30"   # macOS systemRed
-BLUE     = "#007AFF"   # macOS systemBlue  (Sonnet accent)
-BLUE_DK  = "#0056CC"   # Save-button hover
+# ── Theme-aware palette ───────────────────────────────────────────────────────
+
+def _palette() -> dict:
+    """Return color tokens based on current Windows theme. Re-read on each call."""
+    light = win32_ui.is_light_theme()
+    return {
+        "BG":      "#f3f3f3" if light else "#202020",
+        "BG_SEC":  "#e8e8e8" if light else "#2c2c2c",
+        "FG":      "#1c1c1c" if light else "#f0f0f0",
+        "FG_DIM":  "#767676" if light else "#888888",
+        "DIVIDER": "#d0d0d0" if light else "#383838",
+        "BORDER":  "#c0c0c0" if light else "#404040",
+        "GREEN":   "#34C759",
+        "ORANGE":  "#FF9500",
+        "RED":     "#FF3B30",
+        "BLUE":    "#007AFF",
+    }
+
+# Static palette still used by SettingsWindow (unchanged in this task)
+BG      = "#FFFFFF"
+BG_SEC  = "#F2F2F7"
+FG      = "#1C1C1E"
+FG_DIM  = "#8E8E93"
+DIVIDER = "#E5E5EA"
+BORDER  = "#C6C6C8"
+GREEN   = "#34C759"
+ORANGE  = "#FF9500"
+RED     = "#FF3B30"
+BLUE    = "#007AFF"
+BLUE_DK = "#0056CC"
 
 # Typography
-FONT     = ("Segoe UI", 10)
-FONT_B   = ("Segoe UI Semibold", 10)
-FONT_SM  = ("Segoe UI", 8)
-FONT_T   = ("Segoe UI Semibold", 12)
-FONT_IC  = ("Segoe UI", 11)   # icon label
+FONT    = ("Segoe UI", 10)
+FONT_B  = ("Segoe UI Semibold", 10)
+FONT_SM = ("Segoe UI", 8)
+FONT_T  = ("Segoe UI Semibold", 12)
+FONT_IC = ("Segoe UI", 11)
 
-_WIN_W = 260   # fixed popover width (px)
+_WIN_W = 280   # flyout width (px) — changed from 260
+
+# Animation timings
+_SLIDE_PX    = 160   # total slide distance (px)
+_SLIDE_MS    = 150   # slide duration (ms)
+_SLIDE_STEPS = 12    # number of animation frames
+_FADE_MS     = 100   # fade-out duration (ms)
+_FADE_STEPS  = 8
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -93,7 +120,7 @@ def _action_row(parent: tk.Widget, icon: str, label: str, cmd: Callable) -> None
 # ── Detail window ─────────────────────────────────────────────────────────────
 
 class DetailWindow(tk.Toplevel):
-    """Borderless white popover shown on left-click / Show Details."""
+    """Windows 11 flyout — slides up from taskbar, acrylic/DWM background."""
 
     def __init__(
         self,
@@ -107,117 +134,213 @@ class DetailWindow(tk.Toplevel):
         on_open_settings: Callable,
     ):
         super().__init__(root)
-        self._on_refresh      = on_refresh
+        self._on_refresh       = on_refresh
         self._on_open_settings = on_open_settings
-        self._settings        = settings
+        self._settings         = settings
+        self._status           = status
+        self._closing          = False
 
-        self._status = status
+        # Read theme once per open
+        self._pal = _palette()
 
-        self.overrideredirect(True)   # no title bar – popover look
-        self.configure(bg=BORDER)     # 1-px border via surrounding bg colour
+        self.overrideredirect(True)
         self.attributes("-topmost", True)
+        self.attributes("-alpha", 0.0)   # start invisible for slide-in
 
         self._build(usage, last_updated)
-        self.after(0, self._position)
-        self.bind("<Escape>", lambda _e: self.destroy())
+        self.after(0, self._init_win32)
 
-    # ------------------------------------------------------------------
+        self.bind("<Escape>", lambda _e: self.close())
+        self.bind("<FocusOut>", self._on_focus_out)
+
+    # ── Win32 setup ──────────────────────────────────────────────────────
+
+    def _init_win32(self) -> None:
+        self.update_idletasks()
+        hwnd = self.winfo_id()
+        win32_ui.apply_rounded_corners(hwnd)
+        acrylic_ok = win32_ui.apply_acrylic(hwnd, tint_color=0xCC202020)
+        if not acrylic_ok:
+            self.configure(bg=self._pal["BG"])
+        self._position_and_animate()
+
+    # ── Layout ───────────────────────────────────────────────────────────
 
     def _build(self, usage: Optional[UsageData], last_updated: Optional[datetime]) -> None:
-        # Inner frame – 1-px inset gives the border effect
-        wrap = tk.Frame(self, bg=BG)
-        wrap.pack(fill="both", expand=True, padx=1, pady=1)
+        p = self._pal
+        outer = tk.Frame(self, bg=p["BG"], bd=0)
+        outer.pack(fill="both", expand=True, padx=1, pady=1)
 
-        # ── Stats section ───────────────────────────────────────────────
-        stats = tk.Frame(wrap, bg=BG)
-        stats.pack(fill="x", pady=(6, 2))
+        # Title bar
+        title_row = tk.Frame(outer, bg=p["BG"])
+        title_row.pack(fill="x", padx=14, pady=(12, 6))
+        tk.Label(
+            title_row, text="Claude Usage",
+            bg=p["BG"], fg=p["FG"], font=("Segoe UI Semibold", 11),
+        ).pack(side="left")
+
+        # Divider
+        tk.Frame(outer, bg=p["DIVIDER"], height=1).pack(fill="x")
+
+        # Stats section
+        stats = tk.Frame(outer, bg=p["BG"])
+        stats.pack(fill="x", pady=(8, 4))
 
         if usage is None:
             msg = {
-                "relogin":   "Auth error  —  re-login to Claude Code",
-                "ratelimit": "Rate limited by API  —  backing off, will retry",
-                "error":     "Could not reach the API  —  check your connection",
-                "stale":     "Showing last known data  —  retrying…",
-            }.get(self._status, "Fetching data…")
+                "relogin":   "Auth error — re-login to Claude Code",
+                "ratelimit": "Rate limited — backing off, will retry",
+                "error":     "Could not reach API — check connection",
+                "stale":     "Showing last known data — retrying\u2026",
+            }.get(self._status, "Fetching data\u2026")
             tk.Label(
                 stats, text=msg,
-                bg=BG, fg=FG_DIM, font=FONT_SM,
-            ).pack(padx=14, pady=10)
+                bg=p["BG"], fg=p["FG_DIM"], font=("Segoe UI", 9),
+                wraplength=240, justify="left",
+            ).pack(padx=14, pady=8, anchor="w")
         else:
             w = self._settings.warning_threshold
             c = self._settings.critical_threshold
-            self._stat_row(stats, "⏱", "5hr",    usage.five_hour,        w, c,
-                           _remaining(usage.five_hour_resets_at))
-            self._stat_row(stats, "📅", "Week",   usage.seven_day,        w, c,
-                           _remaining(usage.seven_day_resets_at))
+            self._stat_row(stats, "Session (5h)", usage.five_hour, w, c)
+            self._stat_row(stats, "Weekly  (7d)", usage.seven_day, w, c)
             if usage.seven_day_sonnet is not None:
-                self._stat_row(stats, "◆", "Sonnet", usage.seven_day_sonnet, w, c,
-                               icon_color=BLUE)
+                self._stat_row(stats, "Sonnet  (7d)", usage.seven_day_sonnet, w, c)
 
-        # Last updated – subtle caption under the stats
+        # Timestamp
         ts = last_updated.strftime("%H:%M:%S") if last_updated else "never"
         tk.Label(
-            wrap, text=f"Last updated: {ts}",
-            bg=BG, fg=FG_DIM, font=FONT_SM,
-        ).pack(anchor="w", padx=14, pady=(0, 6))
+            outer, text=f"Updated {ts}",
+            bg=p["BG"], fg=p["FG_DIM"], font=("Segoe UI", 8),
+        ).pack(anchor="w", padx=14, pady=(0, 8))
 
-        # ── Actions ─────────────────────────────────────────────────────
-        _rule(wrap)
-        _action_row(wrap, "↻", "Refresh",  self._do_refresh)
-        _action_row(wrap, "⚙", "Settings", self._do_settings)
+        # Button row
+        tk.Frame(outer, bg=p["DIVIDER"], height=1).pack(fill="x")
+        btn_row = tk.Frame(outer, bg=p["BG"])
+        btn_row.pack(fill="x", padx=14, pady=10)
 
-        # ── Quit ────────────────────────────────────────────────────────
-        _rule(wrap)
-        _action_row(wrap, "⏻", "Exit", self.destroy)
+        btn_cfg = dict(
+            bg=p["BG_SEC"], fg=p["FG"], font=("Segoe UI", 9),
+            relief="flat", padx=12, pady=4, cursor="hand2", bd=0,
+            activebackground=p["DIVIDER"], activeforeground=p["FG"],
+        )
+        tk.Button(btn_row, text="Refresh",  command=self._do_refresh,  **btn_cfg).pack(side="left")
+        tk.Button(btn_row, text="Settings", command=self._do_settings, **btn_cfg).pack(side="right")
 
     def _stat_row(
-        self,
-        parent: tk.Widget,
-        icon: str,
-        label: str,
-        value: float,
-        w: int,
-        c: int,
-        rem: str = "",
-        *,
-        icon_color: Optional[str] = None,
+        self, parent: tk.Widget, label: str, value: float, warn: int, crit: int,
     ) -> None:
-        clr = _color(value, w, c)
-        row = tk.Frame(parent, bg=BG)
-        row.pack(fill="x", padx=14, pady=4)
+        p = self._pal
+        clr = p["RED"] if value >= crit else p["ORANGE"] if value >= warn else p["GREEN"]
 
-        fg_icon = icon_color if icon_color else FG_DIM
-        tk.Label(row, text=icon, bg=BG, fg=fg_icon, font=FONT_IC).pack(side="left")
-        # Bold "Label: XX%"
-        tk.Label(
-            row,
-            text=f"  {label}: ",
-            bg=BG, fg=FG, font=FONT_B,
-        ).pack(side="left")
-        tk.Label(row, text=f"{value:.0f}%", bg=BG, fg=clr, font=FONT_B).pack(side="left")
-        # Time remaining on the right
-        if rem:
-            tk.Label(row, text=rem, bg=BG, fg=FG_DIM, font=FONT_SM).pack(side="right")
+        row = tk.Frame(parent, bg=p["BG"])
+        row.pack(fill="x", padx=14, pady=3)
 
-    def _position(self) -> None:
+        tk.Label(row, text=label, bg=p["BG"], fg=p["FG"],
+                 font=("Segoe UI", 10), width=13, anchor="w").pack(side="left")
+        tk.Label(row, text=f"{value:.0f}%", bg=p["BG"], fg=clr,
+                 font=("Segoe UI Semibold", 10), width=4, anchor="e").pack(side="left", padx=(0, 8))
+
+        # Rounded progress bar via Canvas
+        bar_w, bar_h = 100, 6
+        canvas = tk.Canvas(row, width=bar_w, height=bar_h,
+                            bg=p["BG"], highlightthickness=0, bd=0)
+        canvas.pack(side="left")
+        r = bar_h // 2
+        # Track (background)
+        canvas.create_oval(0, 0, bar_h, bar_h, fill=p["BG_SEC"], outline="")
+        canvas.create_rectangle(r, 0, bar_w - r, bar_h, fill=p["BG_SEC"], outline="")
+        canvas.create_oval(bar_w - bar_h, 0, bar_w, bar_h, fill=p["BG_SEC"], outline="")
+        # Fill
+        fill_w = max(bar_h, int(bar_w * min(value, 100) / 100))
+        canvas.create_oval(0, 0, bar_h, bar_h, fill=clr, outline="")
+        canvas.create_rectangle(r, 0, fill_w - r, bar_h, fill=clr, outline="")
+        if fill_w - bar_h >= 0:
+            canvas.create_oval(fill_w - bar_h, 0, fill_w, bar_h, fill=clr, outline="")
+
+    # ── Position + animation ─────────────────────────────────────────────
+
+    def _position_and_animate(self) -> None:
         self.update_idletasks()
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
-        # Enforce minimum width; height is driven by content
-        w  = max(self.winfo_reqwidth(), self.winfo_width(), _WIN_W + 2)
+        tb = win32_ui.taskbar_height()
+        w  = max(self.winfo_reqwidth(), _WIN_W)
         h  = max(self.winfo_reqheight(), self.winfo_height())
-        # Set explicit geometry so the width is always consistent
-        self.geometry(f"{w}x{h}+{max(0, sw - w - 12)}+{max(0, sh - h - 52)}")
+
+        x      = sw - w - 12
+        y_end  = sh - h - tb - 12
+        y_start = y_end + _SLIDE_PX
+
+        self.geometry(f"{w}x{h}+{x}+{y_start}")
+        self.attributes("-alpha", 1.0)
         self.lift()
         self.after(50, self.focus_force)
+        self._animate_slide(x, y_start, y_end, step=0)
+
+    def _animate_slide(self, x: int, y_from: int, y_to: int, step: int) -> None:
+        if step >= _SLIDE_STEPS:
+            try:
+                self.geometry(f"+{x}+{y_to}")
+            except tk.TclError:
+                pass
+            return
+        t = (step + 1) / _SLIDE_STEPS
+        ease = 1 - (1 - t) ** 2   # ease-out quadratic
+        y = int(y_from + (y_to - y_from) * ease)
+        try:
+            self.geometry(f"+{x}+{y}")
+        except tk.TclError:
+            return
+        delay = max(1, _SLIDE_MS // _SLIDE_STEPS)
+        self.after(delay, lambda: self._animate_slide(x, y_from, y_to, step + 1))
+
+    # ── Close (fade-out) ─────────────────────────────────────────────────
+
+    def close(self) -> None:
+        """Trigger fade-out animation then destroy."""
+        if self._closing:
+            return
+        self._closing = True
+        self._animate_fade(step=0)
+
+    def _animate_fade(self, step: int) -> None:
+        if step >= _FADE_STEPS:
+            try:
+                self.destroy()
+            except tk.TclError:
+                pass
+            return
+        alpha = 1.0 - (step + 1) / _FADE_STEPS
+        try:
+            self.attributes("-alpha", alpha)
+        except tk.TclError:
+            return
+        self.after(max(1, _FADE_MS // _FADE_STEPS), lambda: self._animate_fade(step + 1))
+
+    # ── Focus-loss dismiss ───────────────────────────────────────────────
+
+    def _on_focus_out(self, _event) -> None:
+        self.after(50, self._check_focus)
+
+    def _check_focus(self) -> None:
+        if self._closing:
+            return
+        try:
+            focused = self.focus_displayof()
+        except tk.TclError:
+            return
+        if focused is None or not str(focused).startswith(str(self)):
+            self.close()
+
+    # ── Actions ──────────────────────────────────────────────────────────
 
     def _do_refresh(self) -> None:
-        self.destroy()
-        self._on_refresh()
+        self.close()
+        self.after(_FADE_MS + 20, self._on_refresh)
 
     def _do_settings(self) -> None:
-        self.destroy()
-        self._on_open_settings()
+        self.close()
+        self.after(_FADE_MS + 20, self._on_open_settings)
 
 
 # ── Settings window ───────────────────────────────────────────────────────────
