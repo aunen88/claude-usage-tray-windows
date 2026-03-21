@@ -72,6 +72,9 @@ class App:
         # Cross-thread dispatch queue
         self._gui_q: queue.Queue = queue.Queue()
 
+        # Exponential backoff state for rate-limiting
+        self._backoff_s: int = 60   # current backoff duration in seconds
+
         # Hidden tkinter root
         self.root = tk.Tk()
         self.root.withdraw()
@@ -79,12 +82,22 @@ class App:
 
         # Pystray icon (placeholder until first fetch)
         placeholder = render_icon(None, None, status="no_token")
-        self.icon = pystray.Icon(
-            "ClaudeUsageTray",
-            icon=placeholder,
-            title="Claude Usage – loading…",
-            menu=self._make_menu(),
-        )
+        try:
+            self.icon = pystray.Icon(
+                "ClaudeUsageTray",
+                icon=placeholder,
+                title="Claude Usage \u2013 loading\u2026",
+                menu=self._make_menu(),
+                on_click=self._on_tray_click,  # pystray >= 0.19 single-click
+            )
+        except TypeError:
+            # Older pystray without on_click — double-click via default=True menu item
+            self.icon = pystray.Icon(
+                "ClaudeUsageTray",
+                icon=placeholder,
+                title="Claude Usage \u2013 loading\u2026",
+                menu=self._make_menu(),
+            )
 
     # ── Menu ─────────────────────────────────────────────────────────────────
 
@@ -145,7 +158,8 @@ class App:
 
     def _poll_tick(self) -> None:
         """Main-thread timer callback – fires fetch in a daemon thread."""
-        threading.Thread(target=self._fetch, daemon=True).start()
+        if self.status != "ratelimit":   # skip while the backoff timer is running
+            threading.Thread(target=self._fetch, daemon=True).start()
         self._schedule_next_poll()
 
     def _fetch(self) -> None:
@@ -162,6 +176,7 @@ class App:
                 data.five_hour, data.seven_day,
                 f"{data.seven_day_sonnet:.0f}%" if data.seven_day_sonnet is not None else "n/a",
             )
+            self._backoff_s = 60   # reset backoff on success
             self._post(self._apply_state, data, "ok", "")
 
         except AuthError as exc:
@@ -175,10 +190,14 @@ class App:
                        lambda: threading.Thread(target=self._fetch, daemon=True).start())
 
         except RateLimitError as exc:
-            log.warning("Rate limited: %s – backing off %ds", exc, exc.retry_after)
+            # Use API hint if meaningful, otherwise use exponential backoff
+            if exc.retry_after > 0:
+                self._backoff_s = min(exc.retry_after, 900)
+            else:
+                self._backoff_s = min(self._backoff_s * 2, 900)  # double each time, cap 15 min
+            log.warning("Rate limited – backing off %ds", self._backoff_s)
             self._post(self._apply_state, self.usage, "ratelimit", str(exc))
-            # Retry after the API-specified window (min 60 s, max 15 min)
-            backoff_ms = max(60, min(exc.retry_after, 900)) * 1000
+            backoff_ms = self._backoff_s * 1000
             self._post(self.root.after, backoff_ms,
                        lambda: threading.Thread(target=self._fetch, daemon=True).start())
 
@@ -261,12 +280,22 @@ class App:
     def _do_refresh(self) -> None:
         threading.Thread(target=self._fetch, daemon=True).start()
 
-    def _open_detail(self) -> None:
+    def _on_tray_click(self, _icon, _button, _time=None) -> None:
+        """Called from pystray thread on single left-click."""
+        self._post(self._toggle_detail)
+
+    def _toggle_detail(self) -> None:
+        """Open flyout if closed; close it (with animation) if already open."""
         if self._detail_win and self._detail_win.winfo_exists():
-            self._detail_win.lift()
-            self._detail_win.focus_force()
+            try:
+                self._detail_win.close()   # DetailWindow.close() triggers fade-out
+            except Exception:
+                try:
+                    self._detail_win.destroy()
+                except Exception:
+                    pass
+            self._detail_win = None
             return
-        # If no token, open settings directly instead
         if self.status == "no_token":
             self._open_settings()
             return
@@ -279,6 +308,10 @@ class App:
             on_refresh=self._do_refresh,
             on_open_settings=self._open_settings,
         )
+
+    def _open_detail(self) -> None:
+        """Called from the 'Show Details' menu item (double-click fallback)."""
+        self._toggle_detail()
 
     def _open_settings(self) -> None:
         if self._settings_win and self._settings_win.winfo_exists():
