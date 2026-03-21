@@ -193,6 +193,39 @@ def fetch_usage(token: str) -> UsageData:
     )
 
 
+def test_connection(token: str) -> tuple[bool, str]:
+    """One-shot connectivity check.  Returns (success, human-readable message).
+
+    Never raises — all errors are caught and returned as (False, message).
+    """
+    try:
+        resp = requests.get(
+            API_URL,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "anthropic-beta": _BETA,
+            },
+            timeout=_TIMEOUT,
+        )
+    except Exception as exc:
+        return False, f"Could not reach API — {exc}"
+
+    if resp.status_code == 401:
+        return False, "401 — token rejected"
+    if resp.status_code == 429:
+        return False, "429 — rate limited, try again shortly"
+
+    try:
+        resp.raise_for_status()
+    except Exception as exc:
+        return False, f"HTTP error — {exc}"
+
+    body = resp.json()
+    fh = float((body.get("five_hour") or {}).get("utilization", 0))
+    sd = float((body.get("seven_day") or {}).get("utilization", 0))
+    return True, f"Connected — {fh:.0f}% / {sd:.0f}%"
+
+
 # ---------------------------------------------------------------------------
 # Quick smoke-test (run this file directly to verify token + API)
 # ---------------------------------------------------------------------------
