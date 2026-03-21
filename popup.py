@@ -370,13 +370,16 @@ class SettingsWindow(tk.Toplevel):
         self.bind("<FocusOut>", self._on_focus_out)
 
     def _init_win32(self) -> None:
-        self.update_idletasks()
-        hwnd = self.winfo_id()
-        win32_ui.apply_rounded_corners(hwnd)
-        acrylic_ok = win32_ui.apply_acrylic(hwnd, tint_color=0xCC202020)
-        if not acrylic_ok:
-            self.configure(bg=self._pal["BG"])
-        self._center_and_show()
+        try:
+            self.update_idletasks()
+            hwnd = self.winfo_id()
+            win32_ui.apply_rounded_corners(hwnd)
+            acrylic_ok = win32_ui.apply_acrylic(hwnd, tint_color=0xCC202020)
+            if not acrylic_ok:
+                self.configure(bg=self._pal["BG"])
+            self._center_and_show()
+        except tk.TclError:
+            pass
 
     def _build(self) -> None:
         p = self._pal
