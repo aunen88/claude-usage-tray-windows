@@ -6,7 +6,6 @@ SettingsWindow – modal settings sheet
 
 from __future__ import annotations
 
-import threading
 import tkinter as tk
 import tkinter.messagebox
 from datetime import datetime, timezone
