@@ -193,7 +193,7 @@ def fetch_usage(token: str) -> UsageData:
     )
 
 
-def test_connection(token: str) -> tuple[bool, str]:
+def test_connection(token: str) -> Tuple[bool, str]:
     """One-shot connectivity check.  Returns (success, human-readable message).
 
     Never raises — all errors are caught and returned as (False, message).
@@ -217,12 +217,12 @@ def test_connection(token: str) -> tuple[bool, str]:
 
     try:
         resp.raise_for_status()
+        body = resp.json()
+        fh = float((body.get("five_hour") or {}).get("utilization", 0))
+        sd = float((body.get("seven_day") or {}).get("utilization", 0))
     except Exception as exc:
         return False, f"HTTP error — {exc}"
 
-    body = resp.json()
-    fh = float((body.get("five_hour") or {}).get("utilization", 0))
-    sd = float((body.get("seven_day") or {}).get("utilization", 0))
     return True, f"Connected — {fh:.0f}% / {sd:.0f}%"
 
 
