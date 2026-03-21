@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 import winreg
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 _APPDATA = os.environ.get("APPDATA", os.path.expanduser("~"))
 CONFIG_DIR = Path(_APPDATA) / "ClaudeUsageTray"
@@ -77,4 +80,4 @@ def set_startup_enabled(enabled: bool) -> None:
                 except FileNotFoundError:
                     pass
     except OSError as exc:
-        print(f"[config] Could not update startup registry: {exc}")
+        log.error("Could not update startup registry: %s", exc)

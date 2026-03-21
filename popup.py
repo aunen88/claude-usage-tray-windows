@@ -367,7 +367,8 @@ class SettingsWindow(tk.Toplevel):
         self._build()
         self.after(0, self._init_win32)
         self.bind("<Escape>", lambda _e: self.close())
-        self.bind("<FocusOut>", self._on_focus_out)
+        # No FocusOut dismiss — clicking native controls (checkbox, slider)
+        # briefly steals focus and would close the window unintentionally.
 
     def _init_win32(self) -> None:
         try:
@@ -557,7 +558,9 @@ class SettingsWindow(tk.Toplevel):
                  font=("Segoe UI", 10)).pack(side="left")
         tk.Checkbutton(
             row, variable=var,
-            bg=p["BG"], activebackground=p["BG"], selectcolor=p["BG_SEC"],
+            bg=p["BG"], activebackground=p["BG"],
+            selectcolor="#007AFF",   # blue fill when checked — visible on any bg
+            fg=p["FG"],
         ).pack(side="right")
 
     def _center_and_show(self) -> None:
