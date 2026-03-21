@@ -7,7 +7,6 @@ SettingsWindow – modal settings sheet
 from __future__ import annotations
 
 import tkinter as tk
-import tkinter.messagebox
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
@@ -345,7 +344,7 @@ class DetailWindow(tk.Toplevel):
 # ── Settings window ───────────────────────────────────────────────────────────
 
 class SettingsWindow(tk.Toplevel):
-    """Clean settings sheet matching the macOS aesthetics."""
+    """Settings flyout — Windows 11 style, theme-aware."""
 
     def __init__(
         self,
@@ -357,214 +356,252 @@ class SettingsWindow(tk.Toplevel):
         self._settings = settings
         self._on_save  = on_save
         self._vars: dict[str, tk.Variable] = {}
+        self._closing = False
 
-        self.title("Claude Usage – Settings")
-        self.resizable(False, False)
-        self.configure(bg=BG_SEC)
+        self._pal = _palette()
+
+        self.overrideredirect(True)
         self.attributes("-topmost", True)
+        self.attributes("-alpha", 0.0)
 
         self._build()
-        self.after(0, self._center)
-        self.bind("<Escape>", lambda _e: self.destroy())
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.after(0, self._init_win32)
+        self.bind("<Escape>", lambda _e: self.close())
+        self.bind("<FocusOut>", self._on_focus_out)
 
-    # ------------------------------------------------------------------
+    def _init_win32(self) -> None:
+        self.update_idletasks()
+        hwnd = self.winfo_id()
+        win32_ui.apply_rounded_corners(hwnd)
+        acrylic_ok = win32_ui.apply_acrylic(hwnd, tint_color=0xCC202020)
+        if not acrylic_ok:
+            self.configure(bg=self._pal["BG"])
+        self._center_and_show()
 
     def _build(self) -> None:
-        # ── Header ──────────────────────────────────────────────────────
-        hdr = tk.Frame(self, bg=BG)
-        hdr.pack(fill="x")
+        p = self._pal
+        outer = tk.Frame(self, bg=p["BG"])
+        outer.pack(fill="both", expand=True, padx=1, pady=1)
+
+        # Title
         tk.Label(
-            hdr, text="◑  Claude Usage  –  Settings",
-            bg=BG, fg=FG, font=FONT_T,
-        ).pack(side="left", padx=16, pady=14)
-        _rule(self)
+            outer, text="Settings",
+            bg=p["BG"], fg=p["FG"], font=("Segoe UI Semibold", 11),
+        ).pack(anchor="w", padx=14, pady=(14, 8))
+        tk.Frame(outer, bg=p["DIVIDER"], height=1).pack(fill="x")
 
-        # ── Body ────────────────────────────────────────────────────────
-        body = tk.Frame(self, bg=BG_SEC)
-        body.pack(fill="both", expand=True)
+        body = tk.Frame(outer, bg=p["BG"])
+        body.pack(fill="both", expand=True, padx=14, pady=8)
 
-        # Thresholds
-        self._section_label(body, "THRESHOLDS")
-        card = self._card(body)
-        self._slider_row(card, "Warning (%)",  "warning_threshold",
-                         50,  95, self._settings.warning_threshold)
-        _rule(card)
-        self._slider_row(card, "Critical (%)", "critical_threshold",
-                         60, 100, self._settings.critical_threshold)
+        # Threshold sliders
+        self._slider_row(body, "Warning threshold",  "warning_threshold",
+                         50, 95, self._settings.warning_threshold, "%")
+        self._slider_row(body, "Critical threshold", "critical_threshold",
+                         60, 100, self._settings.critical_threshold, "%")
+        self._slider_row(body, "Refresh interval",   "refresh_interval",
+                         10, 300, self._settings.refresh_interval, "s")
 
-        # Polling
-        self._section_label(body, "POLLING")
-        card2 = self._card(body)
-        self._entry_row(card2, "Refresh interval (s)", "refresh_interval",
-                        str(self._settings.refresh_interval))
+        tk.Frame(body, bg=p["DIVIDER"], height=1).pack(fill="x", pady=8)
 
         # Token override
-        self._section_label(body, "TOKEN OVERRIDE")
-        card3 = self._card(body)
-        self._token_rows(card3)
+        tk.Label(body, text="Token override", bg=p["BG"], fg=p["FG"],
+                 font=("Segoe UI", 10)).pack(anchor="w")
+        self._token_rows(body)
 
-        # Startup
-        self._section_label(body, "SYSTEM")
-        card4 = self._card(body)
-        self._startup_row(card4)
+        tk.Frame(body, bg=p["DIVIDER"], height=1).pack(fill="x", pady=8)
 
-        # ── Footer ──────────────────────────────────────────────────────
-        _rule(self)
-        ftr = tk.Frame(self, bg=BG)
-        ftr.pack(fill="x")
+        # Start with Windows checkbox
+        self._startup_row(body)
 
-        rst = tk.Label(
-            ftr, text="Reset to Defaults",
-            bg=BG, fg=RED, font=FONT, cursor="hand2",
+        # Footer buttons
+        tk.Frame(outer, bg=p["DIVIDER"], height=1).pack(fill="x")
+        ftr = tk.Frame(outer, bg=p["BG"])
+        ftr.pack(fill="x", padx=14, pady=10)
+
+        btn_cfg = dict(
+            font=("Segoe UI", 9), relief="flat", padx=14, pady=5,
+            cursor="hand2", bd=0,
         )
-        rst.pack(side="left", padx=16, pady=10)
-        rst.bind("<Button-1>", lambda _e: self._reset())
-
         tk.Button(
             ftr, text="Save", command=self._save,
-            bg=BLUE, fg="white", font=FONT_B,
-            relief="flat", padx=16, pady=5,
-            activebackground=BLUE_DK, activeforeground="white",
-            cursor="hand2", bd=0,
-        ).pack(side="right", padx=16, pady=10)
-
-    # ------------------------------------------------------------------
-
-    def _section_label(self, parent: tk.Widget, text: str) -> None:
-        tk.Label(
-            parent, text=text,
-            bg=BG_SEC, fg=FG_DIM, font=FONT_SM,
-        ).pack(anchor="w", padx=20, pady=(10, 2))
-
-    def _card(self, parent: tk.Widget) -> tk.Frame:
-        f = tk.Frame(parent, bg=BG)
-        f.pack(fill="x", padx=16, pady=(0, 4))
-        return f
+            bg="#007AFF", fg="white",
+            activebackground="#0056CC", activeforeground="white",
+            **btn_cfg,
+        ).pack(side="right")
+        tk.Button(
+            ftr, text="Cancel", command=self.close,
+            bg=p["BG_SEC"], fg=p["FG"],
+            activebackground=p["DIVIDER"], activeforeground=p["FG"],
+            **btn_cfg,
+        ).pack(side="right", padx=(0, 8))
 
     def _slider_row(
-        self, parent: tk.Widget,
-        label: str, key: str,
-        from_: int, to: int, default: int,
+        self, parent: tk.Widget, label: str, key: str,
+        from_: int, to: int, default: int, unit: str,
     ) -> None:
+        p = self._pal
         var = tk.IntVar(value=default)
         self._vars[key] = var
 
-        row = tk.Frame(parent, bg=BG)
-        row.pack(fill="x", padx=14, pady=8)
+        row = tk.Frame(parent, bg=p["BG"])
+        row.pack(fill="x", pady=4)
 
-        # Label row with live value on the right
-        hdr = tk.Frame(row, bg=BG)
+        hdr = tk.Frame(row, bg=p["BG"])
         hdr.pack(fill="x")
-        tk.Label(hdr, text=label, bg=BG, fg=FG, font=FONT).pack(side="left")
-        val_str = tk.StringVar(value=f"{default}%")
-        tk.Label(hdr, textvariable=val_str, bg=BG, fg=FG_DIM, font=FONT).pack(side="right")
+        tk.Label(hdr, text=label, bg=p["BG"], fg=p["FG"],
+                 font=("Segoe UI", 10)).pack(side="left")
+        val_str = tk.StringVar(value=f"{default}{unit}")
+        tk.Label(hdr, textvariable=val_str, bg=p["BG"], fg=p["FG_DIM"],
+                 font=("Segoe UI", 10)).pack(side="right")
 
         def _on_move(v: str) -> None:
-            val_str.set(f"{int(float(v))}%")
+            val_str.set(f"{int(float(v))}{unit}")
 
         tk.Scale(
             row, from_=from_, to=to,
             orient="horizontal", variable=var, command=_on_move,
-            bg=BG, fg=FG, troughcolor=BG_SEC,
+            bg=p["BG"], fg=p["FG"], troughcolor=p["BG_SEC"],
             highlightthickness=0, showvalue=False,
             relief="flat", sliderlength=18, bd=0,
-        ).pack(fill="x", pady=(4, 0))
-
-    def _entry_row(
-        self, parent: tk.Widget,
-        label: str, key: str, default: str,
-    ) -> None:
-        var = tk.StringVar(value=default)
-        self._vars[key] = var
-        row = tk.Frame(parent, bg=BG)
-        row.pack(fill="x", padx=14, pady=10)
-        tk.Label(row, text=label, bg=BG, fg=FG, font=FONT).pack(side="left")
-        tk.Entry(
-            row, textvariable=var,
-            bg=BG_SEC, fg=FG, insertbackground=FG,
-            relief="flat", width=6, font=FONT,
-        ).pack(side="right")
+        ).pack(fill="x")
 
     def _token_rows(self, parent: tk.Widget) -> None:
+        import threading as _threading
+        import api as api_module
+        p = self._pal
         var = tk.StringVar(value=self._settings.token_override)
         self._vars["token_override"] = var
 
-        row = tk.Frame(parent, bg=BG)
-        row.pack(fill="x", padx=14, pady=(10, 0))
+        row = tk.Frame(parent, bg=p["BG"])
+        row.pack(fill="x", pady=(4, 0))
 
         entry = tk.Entry(
             row, textvariable=var,
-            bg=BG_SEC, fg=FG, insertbackground=FG,
-            relief="flat", width=26, show="●", font=FONT,
+            bg=p["BG_SEC"], fg=p["FG"], insertbackground=p["FG"],
+            relief="flat", width=28, show="●", font=("Segoe UI", 9),
         )
         entry.pack(side="left")
 
         def _toggle():
             entry.config(show="" if entry.cget("show") else "●")
 
-        eye = tk.Label(row, text="👁", bg=BG, fg=FG_DIM,
+        eye = tk.Label(row, text="👁", bg=p["BG"], fg=p["FG_DIM"],
                        font=("Segoe UI", 11), cursor="hand2")
         eye.pack(side="left", padx=(6, 0))
         eye.bind("<Button-1>", lambda _e: _toggle())
 
+        # Test connection button + inline result label
+        test_row = tk.Frame(parent, bg=p["BG"])
+        test_row.pack(fill="x", pady=(4, 0))
+
+        self._test_result_var = tk.StringVar(value="")
+        self._test_btn = tk.Button(
+            test_row, text="Test connection",
+            bg=p["BG_SEC"], fg=p["FG"], font=("Segoe UI", 9),
+            relief="flat", padx=10, pady=3, cursor="hand2", bd=0,
+            activebackground=p["DIVIDER"],
+        )
+        self._test_btn.pack(side="left")
+
+        result_lbl = tk.Label(
+            test_row, textvariable=self._test_result_var,
+            bg=p["BG"], fg=p["FG_DIM"], font=("Segoe UI", 9),
+        )
+        result_lbl.pack(side="left", padx=(8, 0))
+
+        def _run_test():
+            token = var.get().strip()
+            if not token:
+                t, _ = api_module.find_credentials()
+                token = t or ""
+            if not token:
+                self._test_result_var.set("✗ No token found")
+                return
+            self._test_btn.config(state="disabled")
+            self._test_result_var.set("Testing…")
+
+            def _work():
+                ok, msg = api_module.test_connection(token)
+                try:
+                    self.after(0, lambda: _show_result(ok, msg))
+                except tk.TclError:
+                    pass
+
+            def _show_result(ok: bool, msg: str) -> None:
+                try:
+                    self._test_btn.config(state="normal")
+                    self._test_result_var.set(f"{'✓' if ok else '✗'} {msg}")
+                except tk.TclError:
+                    pass
+
+            _threading.Thread(target=_work, daemon=True).start()
+
+        self._test_btn.config(command=_run_test)
+
         tk.Label(
             parent,
             text="Leave blank to auto-detect from credentials file.",
-            bg=BG, fg=FG_DIM, font=FONT_SM,
-        ).pack(anchor="w", padx=14, pady=(4, 8))
+            bg=p["BG"], fg=p["FG_DIM"], font=("Segoe UI", 8),
+        ).pack(anchor="w", pady=(2, 0))
 
     def _startup_row(self, parent: tk.Widget) -> None:
+        p = self._pal
         var = tk.BooleanVar(value=get_startup_enabled())
         self._vars["startup"] = var
-        row = tk.Frame(parent, bg=BG)
-        row.pack(fill="x", padx=14, pady=10)
-        tk.Label(row, text="Start with Windows", bg=BG, fg=FG, font=FONT).pack(side="left")
+        row = tk.Frame(parent, bg=p["BG"])
+        row.pack(fill="x")
+        tk.Label(row, text="Start with Windows", bg=p["BG"], fg=p["FG"],
+                 font=("Segoe UI", 10)).pack(side="left")
         tk.Checkbutton(
             row, variable=var,
-            bg=BG, activebackground=BG, selectcolor=BG_SEC,
+            bg=p["BG"], activebackground=p["BG"], selectcolor=p["BG_SEC"],
         ).pack(side="right")
 
-    def _center(self) -> None:
+    def _center_and_show(self) -> None:
         self.update_idletasks()
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
-        w  = max(self.winfo_reqwidth(),  self.winfo_width())
+        w  = max(self.winfo_reqwidth(), 320)
         h  = max(self.winfo_reqheight(), self.winfo_height())
-        self.geometry(f"+{max(0, (sw - w) // 2)}+{max(0, (sh - h) // 2)}")
+        self.geometry(f"{w}x{h}+{max(0,(sw-w)//2)}+{max(0,(sh-h)//2)}")
+        self.attributes("-alpha", 1.0)
         self.lift()
         self.after(50, self.focus_force)
 
-    # ------------------------------------------------------------------
+    def close(self) -> None:
+        if self._closing:
+            return
+        self._closing = True
+        self.destroy()
 
-    def _reset(self) -> None:
-        d = Settings()
-        self._vars["warning_threshold"].set(d.warning_threshold)
-        self._vars["critical_threshold"].set(d.critical_threshold)
-        self._vars["refresh_interval"].set(str(d.refresh_interval))
-        self._vars["token_override"].set("")
+    def _on_focus_out(self, _event) -> None:
+        self.after(50, self._check_focus)
+
+    def _check_focus(self) -> None:
+        if self._closing:
+            return
+        try:
+            focused = self.focus_displayof()
+        except tk.TclError:
+            return
+        if focused is None or not str(focused).startswith(str(self)):
+            self.close()
 
     def _save(self) -> None:
         try:
             new = Settings(
-                warning_threshold=int(self._vars["warning_threshold"].get()),
-                critical_threshold=int(self._vars["critical_threshold"].get()),
-                refresh_interval=max(10, int(self._vars["refresh_interval"].get())),
-                token_override=self._vars["token_override"].get().strip(),
+                warning_threshold  = int(self._vars["warning_threshold"].get()),
+                critical_threshold = int(self._vars["critical_threshold"].get()),
+                refresh_interval   = int(self._vars["refresh_interval"].get()),
+                token_override     = self._vars["token_override"].get().strip(),
             )
-        except ValueError as exc:
-            tk.messagebox.showerror("Invalid input", str(exc), parent=self)
-            return
+        except (ValueError, KeyError):
+            return  # sliders prevent invalid values
 
         if new.warning_threshold >= new.critical_threshold:
-            tk.messagebox.showerror(
-                "Invalid thresholds",
-                "Warning threshold must be less than critical threshold.",
-                parent=self,
-            )
-            return
+            return  # sliders should prevent this
 
         set_startup_enabled(bool(self._vars["startup"].get()))
         save_settings(new)
         self._on_save(new)
-        self.destroy()
+        self.close()
