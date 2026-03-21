@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# App settings (contain user thresholds / token overrides – keep out of repo)
+settings.json
+
+# Secrets / env
+.env
+*.env
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
