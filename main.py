@@ -74,6 +74,7 @@ class App:
 
         # Exponential backoff state for rate-limiting
         self._backoff_s: int = 60   # current backoff duration in seconds
+        self._backoff_pending: bool = False  # guard against duplicate backoff timers
 
         # Hidden tkinter root
         self.root = tk.Tk()
@@ -177,6 +178,7 @@ class App:
                 f"{data.seven_day_sonnet:.0f}%" if data.seven_day_sonnet is not None else "n/a",
             )
             self._backoff_s = 60   # reset backoff on success
+            self._post(self._clear_backoff_pending)
             self._post(self._apply_state, data, "ok", "")
 
         except AuthError as exc:
@@ -186,8 +188,7 @@ class App:
                 self._post(self._clear_cached_token)
             self._post(self._apply_state, self.usage, "relogin", str(exc))
             # Schedule a fast retry in 10 s in case this was a transient 401
-            self._post(self.root.after, 10_000,
-                       lambda: threading.Thread(target=self._fetch, daemon=True).start())
+            self._post(self._schedule_backoff_fetch, 10_000)
 
         except RateLimitError as exc:
             # Use API hint if meaningful, otherwise use exponential backoff
@@ -197,9 +198,7 @@ class App:
                 self._backoff_s = min(self._backoff_s * 2, 900)  # double each time, cap 15 min
             log.warning("Rate limited – backing off %ds", self._backoff_s)
             self._post(self._apply_state, self.usage, "ratelimit", str(exc))
-            backoff_ms = self._backoff_s * 1000
-            self._post(self.root.after, backoff_ms,
-                       lambda: threading.Thread(target=self._fetch, daemon=True).start())
+            self._post(self._schedule_backoff_fetch, self._backoff_s * 1000)
 
         except Exception as exc:
             log.error("Fetch failed: %s", exc)
@@ -227,6 +226,21 @@ class App:
     def _clear_cached_token(self) -> None:
         self._token = None
         self._refresh_token = None
+
+    def _clear_backoff_pending(self) -> None:
+        self._backoff_pending = False
+
+    def _schedule_backoff_fetch(self, delay_ms: int) -> None:
+        """Schedule a post-backoff fetch; silently drops duplicates (main thread)."""
+        if self._backoff_pending:
+            log.debug("Backoff fetch already scheduled – skipping duplicate")
+            return
+        self._backoff_pending = True
+        self.root.after(delay_ms, self._run_backoff_fetch)
+
+    def _run_backoff_fetch(self) -> None:
+        self._backoff_pending = False
+        threading.Thread(target=self._fetch, daemon=True).start()
 
     # ── State application (main thread) ──────────────────────────────────────
 
