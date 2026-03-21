@@ -22,7 +22,7 @@ _APP_NAME = "ClaudeUsageTray"
 class Settings:
     warning_threshold: int = 80
     critical_threshold: int = 90
-    refresh_interval: int = 60
+    refresh_interval: int = 300
     token_override: str = ""
 
 
@@ -34,7 +34,7 @@ def load_settings() -> Settings:
             s = Settings(**valid)
             # Clamp refresh_interval to slider's max (300 s) in case an older
             # settings.json contains a larger value.
-            s.refresh_interval = min(s.refresh_interval, 300)
+            s.refresh_interval = min(s.refresh_interval, 600)
             return s
         except Exception:
             pass

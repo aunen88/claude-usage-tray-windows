@@ -402,7 +402,7 @@ class SettingsWindow(tk.Toplevel):
         self._slider_row(body, "Critical threshold", "critical_threshold",
                          60, 100, self._settings.critical_threshold, "%")
         self._slider_row(body, "Refresh interval",   "refresh_interval",
-                         10, 300, self._settings.refresh_interval, "s")
+                         60, 600, self._settings.refresh_interval, "s")
 
         tk.Frame(body, bg=p["DIVIDER"], height=1).pack(fill="x", pady=8)
 
