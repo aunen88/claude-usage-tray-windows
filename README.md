@@ -2,7 +2,9 @@
 
 A Windows system tray app that shows your real-time [Claude Code](https://claude.ai/claude-code) usage limits at a glance — inspired by the [macOS menu bar version](https://github.com/adntgv/claude-usage-systray).
 
-![Windows 11 flyout showing Session 20% and Weekly 6% usage bars](.github/Screenshot.png)
+![](.github/Screenshot.png)
+![](.github/screenshot2.png)
+![](.github/screenshot3.png)
 
 ## What it shows
 
