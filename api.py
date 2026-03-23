@@ -187,7 +187,7 @@ def fetch_usage(token: str) -> UsageData:
     return UsageData(
         five_hour=float(fh.get("utilization", 0)),
         seven_day=float(sd.get("utilization", 0)),
-        seven_day_sonnet=float(sds["utilization"]) if sds else None,
+        seven_day_sonnet=float(sds.get("utilization", 0)) if sds else None,
         five_hour_resets_at=fh.get("resets_at"),
         seven_day_resets_at=sd.get("resets_at"),
     )

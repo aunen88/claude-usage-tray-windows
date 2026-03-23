@@ -75,6 +75,7 @@ class App:
         # Exponential backoff state for rate-limiting
         self._backoff_s: int = 60   # current backoff duration in seconds
         self._backoff_pending: bool = False  # guard against duplicate backoff timers
+        self._backoff_after_id: Optional[str] = None  # root.after() ID for cancellation
 
         # Hidden tkinter root
         self.root = tk.Tk()
@@ -159,7 +160,7 @@ class App:
 
     def _poll_tick(self) -> None:
         """Main-thread timer callback – fires fetch in a daemon thread."""
-        if self.status != "ratelimit":   # skip while the backoff timer is running
+        if self.status not in ("ratelimit", "relogin"):   # skip while backoff is active
             threading.Thread(target=self._fetch, daemon=True).start()
         self._schedule_next_poll()
 
@@ -236,10 +237,18 @@ class App:
             log.debug("Backoff fetch already scheduled – skipping duplicate")
             return
         self._backoff_pending = True
-        self.root.after(delay_ms, self._run_backoff_fetch)
+        self._backoff_after_id = self.root.after(delay_ms, self._run_backoff_fetch)
+
+    def _cancel_backoff(self) -> None:
+        """Cancel any pending backoff timer (main thread)."""
+        if self._backoff_after_id is not None:
+            self.root.after_cancel(self._backoff_after_id)
+            self._backoff_after_id = None
+        self._backoff_pending = False
 
     def _run_backoff_fetch(self) -> None:
         self._backoff_pending = False
+        self._backoff_after_id = None
         threading.Thread(target=self._fetch, daemon=True).start()
 
     # ── State application (main thread) ──────────────────────────────────────
@@ -292,6 +301,7 @@ class App:
     # ── UI actions (main thread) ──────────────────────────────────────────────
 
     def _do_refresh(self) -> None:
+        self._cancel_backoff()
         threading.Thread(target=self._fetch, daemon=True).start()
 
     def _on_tray_click(self, _icon, _button, _time=None) -> None:
@@ -342,6 +352,10 @@ class App:
         self.settings = new
         # Force token re-read in case override changed
         self._token = None
+        # Cancel any pending backoff so the stale timer doesn't fire after the
+        # immediate fetch below.
+        self._cancel_backoff()
+        self._backoff_s = 60
         self._refresh_icon()
         # Restart polling with the new interval: cancel old schedule by
         # simply scheduling a new one; the old one will harmlessly re-fire once.

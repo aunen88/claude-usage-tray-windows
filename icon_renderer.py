@@ -110,8 +110,15 @@ def render_icon(
         _draw_centered(draw, sz // 2, sz // 2, "!!", _PINK, font)
         return img.resize((_OUT, _OUT), Image.LANCZOS)
 
+    # -- Rate-limited state (distinct from error) --
+    if status == "ratelimit":
+        draw.rectangle([0, 0, sz - 1, sz - 1], fill=_BG_GREY)
+        font = _load_font(40)
+        _draw_centered(draw, sz // 2, sz // 2, "wait", _ORANGE, font)
+        return img.resize((_OUT, _OUT), Image.LANCZOS)
+
     # -- Error / unknown states --
-    if status in ("no_token", "error", "ratelimit") or five_hour is None:
+    if status in ("no_token", "error") or five_hour is None:
         draw.rectangle([0, 0, sz - 1, sz - 1], fill=_BG_GREY)
         font = _load_font(64)
         _draw_centered(draw, sz // 2, sz // 2, "?", _WHITE, font)
