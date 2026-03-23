@@ -151,28 +151,21 @@ def fetch_usage(token: str) -> UsageData:
     requests.RequestException
         Network-level failure.
     """
-    import time
-
-    for attempt in range(2):
-        resp = requests.get(
-            API_URL,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "anthropic-beta": _BETA,
-            },
-            timeout=_TIMEOUT,
-        )
-        if resp.status_code == 401 and attempt == 0:
-            log.warning("Got 401 on first attempt, retrying in 3 s…")
-            time.sleep(3)
-            continue
-        break
+    resp = requests.get(
+        API_URL,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "anthropic-beta": _BETA,
+        },
+        timeout=_TIMEOUT,
+    )
 
     if resp.status_code == 401:
         raise AuthError("HTTP 401 – token rejected. Re-login to Claude Code.")
 
     if resp.status_code == 429:
         retry_after = int(resp.headers.get("retry-after", 300))
+        log.warning("Rate limited – API retry-after: %ds", retry_after)
         raise RateLimitError(
             f"Rate limited by API – retry in {retry_after}s.", retry_after
         )

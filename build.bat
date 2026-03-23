@@ -2,7 +2,8 @@
 setlocal
 
 echo Installing / upgrading build dependencies...
-pip install --upgrade pyinstaller pystray Pillow requests
+pip install --upgrade pystray Pillow requests pefile
+pip install "pyinstaller==6.15.0"
 
 echo.
 echo Building ClaudeUsageTray.exe ...

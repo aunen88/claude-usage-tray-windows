@@ -192,11 +192,11 @@ class App:
             self._post(self._schedule_backoff_fetch, 10_000)
 
         except RateLimitError as exc:
-            # Use API hint if meaningful, otherwise use exponential backoff
+            # Use API hint if meaningful, otherwise use exponential backoff (cap 1 hour)
             if exc.retry_after > 0:
-                self._backoff_s = min(exc.retry_after, 900)
+                self._backoff_s = min(exc.retry_after, 3600)
             else:
-                self._backoff_s = min(self._backoff_s * 2, 900)  # double each time, cap 15 min
+                self._backoff_s = min(self._backoff_s * 2, 3600)
             log.warning("Rate limited – backing off %ds", self._backoff_s)
             self._post(self._apply_state, self.usage, "ratelimit", str(exc))
             self._post(self._schedule_backoff_fetch, self._backoff_s * 1000)
