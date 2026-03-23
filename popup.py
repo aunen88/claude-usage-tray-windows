@@ -125,7 +125,7 @@ class DetailWindow(tk.Toplevel):
         on_open_settings: Callable,
     ):
         super().__init__(root)
-        self._root             = root
+        self._tk_root          = root
         self._on_refresh       = on_refresh
         self._on_open_settings = on_open_settings
         self._settings         = settings
@@ -415,11 +415,11 @@ class DetailWindow(tk.Toplevel):
 
     def _do_refresh(self) -> None:
         self.close()
-        self._root.after(_FADE_MS + 20, self._on_refresh)
+        self._tk_root.after(_FADE_MS + 20, self._on_refresh)
 
     def _do_settings(self) -> None:
         self.close()
-        self._root.after(_FADE_MS + 20, self._on_open_settings)
+        self._tk_root.after(_FADE_MS + 20, self._on_open_settings)
 
 
 # ── Settings window ───────────────────────────────────────────────────────────
