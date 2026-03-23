@@ -2,7 +2,8 @@
 setlocal
 
 echo Installing / upgrading build dependencies...
-pip install --upgrade pystray Pillow requests pefile
+pip install --upgrade pystray Pillow requests
+pip install "pefile==2023.2.7"
 pip install "pyinstaller==6.15.0"
 
 echo.
