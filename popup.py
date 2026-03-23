@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import threading as _threading
 import tkinter as tk
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Callable, Optional
 
 import win32_ui
@@ -22,43 +22,44 @@ def _palette() -> dict:
     light = win32_ui.is_light_theme()
     if light:
         return {
-            "BG":       "#f5f4f0",
-            "BG_CARD":  "#eceae4",
-            "BG_HOVER": "#e0deda",
-            "FG":       "#1a1a18",
-            "FG_DIM":   "#666660",
-            "FG_MUTED": "#9a9990",
-            "DIVIDER":  "#d5d3cc",
-            "AMBER":    "#c47a20",
-            "GREEN":    "#22a84a",
-            "ORANGE":   "#d97a1a",
-            "RED":      "#c42b20",
-            "BTN_BG":   "#e4e2dc",
-            "BTN_FG":   "#1a1a18",
-            "ACRYLIC":  0xF0F0EEE8,
+            "BG":          "#f5f4f0",
+            "BG_CARD":     "#eceae4",
+            "BG_HOVER":    "#e0deda",
+            "FG":          "#1a1a18",
+            "FG_DIM":      "#666660",
+            "FG_MUTED":    "#9a9990",
+            "DIVIDER":     "#d5d3cc",
+            "AMBER":       "#c47a20",
+            "GREEN":       "#22a84a",
+            "ORANGE":      "#d97a1a",
+            "RED":         "#c42b20",
+            "BTN_BG":      "#e4e2dc",
+            "BTN_FG":      "#1a1a18",
+            "ACRYLIC":     0xF0F0EEE8,
+            "BANNER_WARN": "#fff5e6",
         }
     return {
-        "BG":       "#161618",
-        "BG_CARD":  "#1e1e22",
-        "BG_HOVER": "#252529",
-        "FG":       "#f0efe8",
-        "FG_DIM":   "#888882",
-        "FG_MUTED": "#555550",
-        "DIVIDER":  "#2c2c30",
-        "AMBER":    "#e8a045",
-        "GREEN":    "#4ade80",
-        "ORANGE":   "#fb923c",
-        "RED":      "#f87171",
-        "BTN_BG":   "#26262a",
-        "BTN_FG":   "#c8c7c0",
-        "ACRYLIC":  0xF0181618,
+        "BG":          "#161618",
+        "BG_CARD":     "#1e1e22",
+        "BG_HOVER":    "#252529",
+        "FG":          "#f0efe8",
+        "FG_DIM":      "#888882",
+        "FG_MUTED":    "#555550",
+        "DIVIDER":     "#2c2c30",
+        "AMBER":       "#e8a045",
+        "GREEN":       "#4ade80",
+        "ORANGE":      "#fb923c",
+        "RED":         "#f87171",
+        "BTN_BG":      "#26262a",
+        "BTN_FG":      "#c8c7c0",
+        "ACRYLIC":     0xF0181618,
+        "BANNER_WARN": "#2a1a0a",
     }
 
 # ── Typography ────────────────────────────────────────────────────────────────
 
 _FONT_BODY     = ("Segoe UI Variable", 10)
 _FONT_BODY_B   = ("Segoe UI Variable", 10, "bold")
-_FONT_TITLE    = ("Segoe UI Variable", 12, "bold")
 _FONT_LABEL    = ("Segoe UI Variable", 9)
 _FONT_NUM      = ("Consolas", 19, "bold")   # large metric value
 _FONT_TS       = ("Consolas", 9)            # timestamp
@@ -124,6 +125,7 @@ class DetailWindow(tk.Toplevel):
         on_open_settings: Callable,
     ):
         super().__init__(root)
+        self._root             = root
         self._on_refresh       = on_refresh
         self._on_open_settings = on_open_settings
         self._settings         = settings
@@ -225,7 +227,7 @@ class DetailWindow(tk.Toplevel):
 
         # Rate-limit banner
         if self._status == "ratelimit":
-            banner_bg = "#2a1a0a" if p["BG"] == "#161618" else "#fff5e6"
+            banner_bg = p["BANNER_WARN"]
             banner = tk.Frame(wrap, bg=banner_bg)
             banner.pack(fill="x", pady=(4, 0))
             tk.Frame(banner, bg=p["ORANGE"], height=1).pack(fill="x")
@@ -413,11 +415,11 @@ class DetailWindow(tk.Toplevel):
 
     def _do_refresh(self) -> None:
         self.close()
-        self.after(_FADE_MS + 20, self._on_refresh)
+        self._root.after(_FADE_MS + 20, self._on_refresh)
 
     def _do_settings(self) -> None:
         self.close()
-        self.after(_FADE_MS + 20, self._on_open_settings)
+        self._root.after(_FADE_MS + 20, self._on_open_settings)
 
 
 # ── Settings window ───────────────────────────────────────────────────────────
@@ -664,6 +666,9 @@ class SettingsWindow(tk.Toplevel):
         toggle_cv.bind("<Button-1>", _toggle)
         row.bind("<Button-1>", _toggle)
         inner.bind("<Button-1>", _toggle)
+        lbl_frame.bind("<Button-1>", _toggle)
+        for child in lbl_frame.winfo_children():
+            child.bind("<Button-1>", _toggle)
         _draw_toggle()
 
     def _center_and_show(self) -> None:
