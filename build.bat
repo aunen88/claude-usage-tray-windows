@@ -12,6 +12,7 @@ python -m PyInstaller ^
     --onefile ^
     --windowed ^
     --name ClaudeUsageTray ^
+    --icon claude_icon.ico ^
     --hidden-import pystray._win32 ^
     --hidden-import PIL._imaging ^
     --hidden-import PIL.ImageFont ^

@@ -23,12 +23,12 @@ from config import Settings, get_startup_enabled, save_settings, set_startup_ena
 # ── Brand icon ───────────────────────────────────────────────────────────────
 
 def _brand_icon_path() -> Path:
-    """Locate claude_icon.png next to the running script/exe."""
-    if getattr(sys, "frozen", False):
-        base = Path(sys.executable).parent
-    else:
-        base = Path(__file__).parent
-    return base / "claude_icon.png"
+    """Locate claude_icon.png — handles both source and PyInstaller builds."""
+    # PyInstaller extracts --add-data files to sys._MEIPASS
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        return Path(meipass) / "claude_icon.png"
+    return Path(__file__).parent / "claude_icon.png"
 
 
 def _load_brand_icon(size: int = 28) -> Optional[_ImageTk.PhotoImage]:
