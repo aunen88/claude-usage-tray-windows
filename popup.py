@@ -5,55 +5,90 @@ SettingsWindow – modal settings sheet, centered on screen
 """
 from __future__ import annotations
 
+import os
+import sys
 import threading as _threading
 import tkinter as tk
 from datetime import datetime
+from pathlib import Path
 from typing import Callable, Optional
+
+from PIL import Image as _PILImage, ImageTk as _ImageTk
 
 import win32_ui
 import api as api_module
 from api import UsageData
 from config import Settings, get_startup_enabled, save_settings, set_startup_enabled
 
+# ── Brand icon ───────────────────────────────────────────────────────────────
+
+def _brand_icon_path() -> Path:
+    """Locate claude_icon.png next to the running script/exe."""
+    if getattr(sys, "frozen", False):
+        base = Path(sys.executable).parent
+    else:
+        base = Path(__file__).parent
+    return base / "claude_icon.png"
+
+
+def _load_brand_icon(size: int = 28) -> Optional[_ImageTk.PhotoImage]:
+    """Load and resize the Claude brand icon. Returns None on failure."""
+    try:
+        img = _PILImage.open(_brand_icon_path())
+        img = img.resize((size, size), _PILImage.LANCZOS)
+        return _ImageTk.PhotoImage(img)
+    except Exception:
+        return None
+
 # ── Palette ───────────────────────────────────────────────────────────────────
 
 def _palette() -> dict:
-    """Return color tokens for the current Windows theme."""
+    """Return color tokens for the current Windows theme.
+
+    Dark palette inspired by "Developer Tool / IDE" color system:
+      BG deep slate, elevated cards, amber (Claude brand) accent,
+      green/orange/red semantic thresholds.
+    Light palette: warm neutral tones with the same accent hierarchy.
+    """
     light = win32_ui.is_light_theme()
     if light:
         return {
-            "BG":          "#f5f4f0",
-            "BG_CARD":     "#eceae4",
-            "BG_HOVER":    "#e0deda",
-            "FG":          "#1a1a18",
-            "FG_DIM":      "#666660",
-            "FG_MUTED":    "#9a9990",
-            "DIVIDER":     "#d5d3cc",
-            "AMBER":       "#c47a20",
-            "GREEN":       "#22a84a",
-            "ORANGE":      "#d97a1a",
-            "RED":         "#c42b20",
-            "BTN_BG":      "#e4e2dc",
-            "BTN_FG":      "#1a1a18",
-            "ACRYLIC":     0xF0F0EEE8,
-            "BANNER_WARN": "#fff5e6",
+            "BG":          "#f8fafc",
+            "BG_CARD":     "#ffffff",
+            "BG_HOVER":    "#f1f5f9",
+            "FG":          "#0f172a",
+            "FG_DIM":      "#475569",
+            "FG_MUTED":    "#94a3b8",
+            "DIVIDER":     "#e2e8f0",
+            "AMBER":       "#d97706",
+            "GREEN":       "#16a34a",
+            "ORANGE":      "#ea580c",
+            "RED":         "#dc2626",
+            "BTN_BG":      "#f1f5f9",
+            "BTN_FG":      "#0f172a",
+            "ACRYLIC":     0xF0F8FAFC,
+            "BANNER_WARN": "#fffbeb",
+            "BAR_BG":      "#e2e8f0",
+            "CARD_BORDER": "#e2e8f0",
         }
     return {
-        "BG":          "#161618",
-        "BG_CARD":     "#1e1e22",
-        "BG_HOVER":    "#252529",
-        "FG":          "#f0efe8",
-        "FG_DIM":      "#888882",
-        "FG_MUTED":    "#555550",
-        "DIVIDER":     "#2c2c30",
-        "AMBER":       "#e8a045",
+        "BG":          "#0f172a",
+        "BG_CARD":     "#1b2336",
+        "BG_HOVER":    "#1e293b",
+        "FG":          "#f8fafc",
+        "FG_DIM":      "#94a3b8",
+        "FG_MUTED":    "#64748b",
+        "DIVIDER":     "#1e293b",
+        "AMBER":       "#f59e0b",
         "GREEN":       "#4ade80",
         "ORANGE":      "#fb923c",
         "RED":         "#f87171",
-        "BTN_BG":      "#26262a",
-        "BTN_FG":      "#c8c7c0",
-        "ACRYLIC":     0xF0181618,
-        "BANNER_WARN": "#2a1a0a",
+        "BTN_BG":      "#1e293b",
+        "BTN_FG":      "#cbd5e1",
+        "ACRYLIC":     0xF00F172A,
+        "BANNER_WARN": "#1c1306",
+        "BAR_BG":      "#1e293b",
+        "CARD_BORDER": "#272f42",
     }
 
 # ── Typography ────────────────────────────────────────────────────────────────
@@ -61,20 +96,21 @@ def _palette() -> dict:
 _FONT_BODY     = ("Segoe UI Variable", 10)
 _FONT_BODY_B   = ("Segoe UI Variable", 10, "bold")
 _FONT_LABEL    = ("Segoe UI Variable", 9)
-_FONT_NUM      = ("Consolas", 19, "bold")   # large metric value
+_FONT_SMALL    = ("Segoe UI Variable", 8)   # reset-time / helper
+_FONT_NUM      = ("Consolas", 22, "bold")   # large metric value
 _FONT_TS       = ("Consolas", 9)            # timestamp
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-_WIN_W       = 300
-_SLIDE_PX    = 160
-_SLIDE_MS    = 150
-_SLIDE_STEPS = 12
+_WIN_W       = 320
+_SLIDE_PX    = 140
+_SLIDE_MS    = 180
+_SLIDE_STEPS = 14
 _FADE_MS     = 100
 _FADE_STEPS  = 8
-_BAR_H       = 4      # progress bar height px
-_BAR_ANIM_MS = 350    # bar fill animation duration ms
-_BAR_STEPS   = 18
+_BAR_H       = 6      # progress bar height px
+_BAR_ANIM_MS = 400    # bar fill animation duration ms
+_BAR_STEPS   = 20
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -108,6 +144,28 @@ def _draw_status_dot(canvas: tk.Canvas, size: int, color: str) -> None:
     canvas.create_oval(1, 1, size-1, size-1, fill=color, outline="")
 
 
+def _format_reset(iso_str: Optional[str]) -> str:
+    """Convert an ISO-8601 reset timestamp to a human-friendly relative string."""
+    if not iso_str:
+        return ""
+    try:
+        # Handle ISO-8601 with or without trailing Z / timezone
+        cleaned = iso_str.replace("Z", "+00:00")
+        reset_dt = datetime.fromisoformat(cleaned)
+        now = datetime.now(reset_dt.tzinfo)
+        delta = reset_dt - now
+        total_s = int(delta.total_seconds())
+        if total_s <= 0:
+            return "Resets soon"
+        hours, rem = divmod(total_s, 3600)
+        mins = rem // 60
+        if hours > 0:
+            return f"Resets in {hours}h {mins}m"
+        return f"Resets in {mins}m"
+    except (ValueError, TypeError):
+        return ""
+
+
 # ── Detail window ─────────────────────────────────────────────────────────────
 
 class DetailWindow(tk.Toplevel):
@@ -138,6 +196,7 @@ class DetailWindow(tk.Toplevel):
         self.overrideredirect(True)
         self.attributes("-topmost", True)
         self.attributes("-alpha", 0.0)
+        self.configure(bg=self._pal["BG"])
 
         self._build(usage, last_updated)
         self.after(0, self._init_win32)
@@ -174,11 +233,15 @@ class DetailWindow(tk.Toplevel):
         row = tk.Frame(parent, bg=p["BG"])
         row.pack(fill="x", padx=14, pady=(13, 11))
 
-        # Amber brand icon
-        ic = tk.Canvas(row, width=28, height=28, bg=p["BG"],
-                       highlightthickness=0)
+        # Claude brand icon
+        self._brand_img = _load_brand_icon(28)
+        if self._brand_img:
+            ic = tk.Label(row, image=self._brand_img, bg=p["BG"])
+        else:
+            ic = tk.Canvas(row, width=28, height=28, bg=p["BG"],
+                           highlightthickness=0)
+            _draw_brand_icon(ic, 28, p["AMBER"])
         ic.pack(side="left")
-        _draw_brand_icon(ic, 28, p["AMBER"])
 
         # Title + subtitle
         txt = tk.Frame(row, bg=p["BG"])
@@ -207,7 +270,7 @@ class DetailWindow(tk.Toplevel):
         c = self._settings.critical_threshold
 
         wrap = tk.Frame(parent, bg=p["BG"])
-        wrap.pack(fill="x", padx=10, pady=10)
+        wrap.pack(fill="x", padx=12, pady=10)
 
         if usage is None:
             msg = {
@@ -217,49 +280,61 @@ class DetailWindow(tk.Toplevel):
                 "stale":     "Showing cached data — retrying…",
             }.get(self._status, "Fetching data…")
             tk.Label(wrap, text=msg, bg=p["BG"], fg=p["FG_DIM"],
-                     font=_FONT_LABEL, wraplength=260, justify="left",
-                     ).pack(padx=4, pady=6, anchor="w")
+                     font=_FONT_LABEL, wraplength=280, justify="left",
+                     ).pack(padx=4, pady=8, anchor="w")
         else:
-            self._metric_card(wrap, "Session · 5h", usage.five_hour, w, c)
-            self._metric_card(wrap, "Weekly  · 7d", usage.seven_day, w, c)
+            self._metric_card(wrap, "Session", "5 hour window",
+                              usage.five_hour, w, c,
+                              reset_at=usage.five_hour_resets_at)
+            self._metric_card(wrap, "Weekly", "7 day window",
+                              usage.seven_day, w, c,
+                              reset_at=usage.seven_day_resets_at)
             if usage.seven_day_sonnet is not None:
-                self._metric_card(wrap, "Sonnet  · 7d", usage.seven_day_sonnet, w, c)
+                self._metric_card(wrap, "Sonnet", "7 day window",
+                                  usage.seven_day_sonnet, w, c)
 
         # Rate-limit banner
         if self._status == "ratelimit":
             banner_bg = p["BANNER_WARN"]
             banner = tk.Frame(wrap, bg=banner_bg)
-            banner.pack(fill="x", pady=(4, 0))
+            banner.pack(fill="x", pady=(6, 0))
             tk.Frame(banner, bg=p["ORANGE"], height=1).pack(fill="x")
             inner = tk.Frame(banner, bg=banner_bg)
             inner.pack(fill="x")
             tk.Label(inner,
-                     text="⚠  Rate limited — retrying…",
+                     text="Rate limited — retrying shortly",
                      bg=banner_bg, fg=p["ORANGE"],
                      font=_FONT_LABEL, anchor="w",
                      ).pack(fill="x", padx=10, pady=7)
 
-    def _metric_card(self, parent: tk.Widget, label: str,
-                     value: float, warn: int, crit: int) -> None:
+    def _metric_card(self, parent: tk.Widget, title: str, subtitle: str,
+                     value: float, warn: int, crit: int,
+                     reset_at: Optional[str] = None) -> None:
         p   = self._pal
         clr = _threshold_color(value, warn, crit, p)
 
         card = tk.Frame(parent, bg=p["BG_CARD"],
                         highlightthickness=1,
-                        highlightbackground=p["DIVIDER"])
-        card.pack(fill="x", pady=3)
+                        highlightbackground=p["CARD_BORDER"])
+        card.pack(fill="x", pady=4)
 
+        # Top row: label left, value right
         top = tk.Frame(card, bg=p["BG_CARD"])
-        top.pack(fill="x", padx=12, pady=(9, 5))
+        top.pack(fill="x", padx=14, pady=(10, 0))
 
-        tk.Label(top, text=label, bg=p["BG_CARD"], fg=p["FG_DIM"],
-                 font=_FONT_LABEL).pack(side="left")
+        lbl_frame = tk.Frame(top, bg=p["BG_CARD"])
+        lbl_frame.pack(side="left", anchor="sw")
+        tk.Label(lbl_frame, text=title, bg=p["BG_CARD"], fg=p["FG"],
+                 font=_FONT_BODY_B).pack(anchor="w")
+        tk.Label(lbl_frame, text=subtitle, bg=p["BG_CARD"], fg=p["FG_MUTED"],
+                 font=_FONT_SMALL).pack(anchor="w")
+
         tk.Label(top, text=f"{value:.0f}%", bg=p["BG_CARD"], fg=clr,
-                 font=_FONT_NUM).pack(side="right")
+                 font=_FONT_NUM).pack(side="right", anchor="ne")
 
         # Progress bar canvas — animated on open
         bar_frame = tk.Frame(card, bg=p["BG_CARD"])
-        bar_frame.pack(fill="x", padx=12, pady=(0, 9))
+        bar_frame.pack(fill="x", padx=14, pady=(6, 0))
 
         canvas = tk.Canvas(bar_frame, height=_BAR_H, bg=p["BG_CARD"],
                            highlightthickness=0)
@@ -271,13 +346,22 @@ class DetailWindow(tk.Toplevel):
             tw = event.width
             cv.delete("all")
             _rounded_rect(cv, 0, 0, tw, _BAR_H, _BAR_H // 2,
-                          fill=p["DIVIDER"], outline="")
+                          fill=p["BAR_BG"], outline="")
             cv._target_fill = int(tw * ratio)
             cv._fill_color  = color
             cv._track_w     = tw
 
         canvas.bind("<Configure>", _on_configure)
         self._bar_canvases.append((canvas, fill_ratio))
+
+        # Reset time (if available)
+        reset_text = _format_reset(reset_at)
+        if reset_text:
+            tk.Label(card, text=reset_text, bg=p["BG_CARD"],
+                     fg=p["FG_MUTED"], font=_FONT_SMALL,
+                     anchor="w").pack(fill="x", padx=14, pady=(4, 8))
+        else:
+            tk.Frame(card, bg=p["BG_CARD"], height=8).pack()
 
     # ── Bar fill animation ────────────────────────────────────────────────
 
@@ -314,9 +398,9 @@ class DetailWindow(tk.Toplevel):
         ts = last_updated.strftime("%H:%M:%S") if last_updated else "never"
 
         row = tk.Frame(parent, bg=p["BG"])
-        row.pack(fill="x", padx=12, pady=8)
+        row.pack(fill="x", padx=14, pady=9)
 
-        tk.Label(row, text=f"updated {ts}", bg=p["BG"], fg=p["FG_MUTED"],
+        tk.Label(row, text=f"Updated {ts}", bg=p["BG"], fg=p["FG_MUTED"],
                  font=_FONT_TS).pack(side="left")
 
         btn_kw = dict(
@@ -329,7 +413,7 @@ class DetailWindow(tk.Toplevel):
         tk.Button(row, text="Settings", command=self._do_settings, **btn_kw
                   ).pack(side="right")
         tk.Button(row, text="Refresh", command=self._do_refresh,
-                  bg=p["BG_CARD"],
+                  bg=p["BTN_BG"],
                   activebackground=p["BG_HOVER"],
                   fg=p["AMBER"],
                   activeforeground=p["AMBER"],
@@ -439,10 +523,13 @@ class SettingsWindow(tk.Toplevel):
         self._vars: dict[str, tk.Variable] = {}
         self._closing  = False
         self._pal      = _palette()
+        self._drag_x   = 0
+        self._drag_y   = 0
 
         self.overrideredirect(True)
         self.attributes("-topmost", True)
         self.attributes("-alpha", 0.0)
+        self.configure(bg=self._pal["BG"])
 
         self._build()
         self.after(0, self._init_win32)
@@ -465,18 +552,27 @@ class SettingsWindow(tk.Toplevel):
         outer = tk.Frame(self, bg=p["BG"])
         outer.pack(fill="both", expand=True, padx=1, pady=1)
 
-        # Header
-        hdr = tk.Frame(outer, bg=p["BG"])
+        # Header (draggable)
+        hdr = tk.Frame(outer, bg=p["BG"], cursor="fleur")
         hdr.pack(fill="x", padx=14, pady=(13, 11))
-        ic = tk.Canvas(hdr, width=28, height=28, bg=p["BG"], highlightthickness=0)
+        self._brand_img = _load_brand_icon(28)
+        if self._brand_img:
+            ic = tk.Label(hdr, image=self._brand_img, bg=p["BG"])
+        else:
+            ic = tk.Canvas(hdr, width=28, height=28, bg=p["BG"], highlightthickness=0)
+            _draw_brand_icon(ic, 28, p["AMBER"])
         ic.pack(side="left")
-        _draw_brand_icon(ic, 28, p["AMBER"])
         txt = tk.Frame(hdr, bg=p["BG"])
         txt.pack(side="left", padx=(9, 0))
         tk.Label(txt, text="Settings", bg=p["BG"], fg=p["FG"],
                  font=_FONT_BODY_B).pack(anchor="w")
         tk.Label(txt, text="Claude Usage Tray", bg=p["BG"], fg=p["FG_DIM"],
                  font=_FONT_LABEL).pack(anchor="w")
+
+        # Bind drag on header and all its children
+        for widget in [hdr, ic, txt] + list(txt.winfo_children()):
+            widget.bind("<Button-1>", self._drag_start)
+            widget.bind("<B1-Motion>", self._drag_move)
 
         tk.Frame(outer, bg=p["DIVIDER"], height=1).pack(fill="x")
 
@@ -490,7 +586,7 @@ class SettingsWindow(tk.Toplevel):
                          60, 100, self._settings.critical_threshold, "%",
                          accent=p["RED"])
         self._slider_row(body, "Refresh interval",   "refresh_interval",
-                         60, 600, self._settings.refresh_interval,   "s",
+                         120, 600, self._settings.refresh_interval,  "s",
                          accent=p["AMBER"])
 
         tk.Frame(body, bg=p["DIVIDER"], height=1).pack(fill="x", pady=8)
@@ -670,6 +766,13 @@ class SettingsWindow(tk.Toplevel):
         for child in lbl_frame.winfo_children():
             child.bind("<Button-1>", _toggle)
         _draw_toggle()
+
+    def _drag_start(self, event) -> None:
+        self._drag_x = event.x_root - self.winfo_x()
+        self._drag_y = event.y_root - self.winfo_y()
+
+    def _drag_move(self, event) -> None:
+        self.geometry(f"+{event.x_root - self._drag_x}+{event.y_root - self._drag_y}")
 
     def _center_and_show(self) -> None:
         self.update_idletasks()

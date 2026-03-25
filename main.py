@@ -160,7 +160,7 @@ class App:
 
     def _poll_tick(self) -> None:
         """Main-thread timer callback – fires fetch in a daemon thread."""
-        if self.status not in ("ratelimit", "relogin"):   # skip while backoff is active
+        if not self._backoff_pending and self.status not in ("ratelimit", "relogin"):
             threading.Thread(target=self._fetch, daemon=True).start()
         self._schedule_next_poll()
 
@@ -188,8 +188,11 @@ class App:
             if not self.settings.token_override:
                 self._post(self._clear_cached_token)
             self._post(self._apply_state, self.usage, "relogin", str(exc))
-            # Schedule a fast retry in 10 s in case this was a transient 401
-            self._post(self._schedule_backoff_fetch, 10_000)
+            # Exponential backoff for auth errors (60s → 120s → ... → 600s cap)
+            # Avoids rapid retries that trigger rate limits
+            self._backoff_s = min(self._backoff_s * 2, 600)
+            log.info("Auth retry in %ds", self._backoff_s)
+            self._post(self._schedule_backoff_fetch, self._backoff_s * 1000)
 
         except RateLimitError as exc:
             # Use API hint if meaningful, otherwise use exponential backoff (cap 1 hour)
@@ -202,9 +205,25 @@ class App:
             self._post(self._schedule_backoff_fetch, self._backoff_s * 1000)
 
         except Exception as exc:
-            log.error("Fetch failed: %s", exc)
-            new_status = "stale" if self.usage else "error"
-            self._post(self._apply_state, self.usage, new_status, str(exc))
+            # Detect 429 that slipped past the RateLimitError handler (e.g.
+            # unparseable retry-after header caused ValueError inside the
+            # status-code-429 branch).
+            is_429 = "429" in str(exc) or (
+                hasattr(exc, "response")
+                and getattr(exc.response, "status_code", None) == 429
+            )
+            if is_429:
+                self._backoff_s = min(self._backoff_s * 2, 3600)
+                log.warning("Rate limited (fallback) – backing off %ds", self._backoff_s)
+                self._post(self._apply_state, self.usage, "ratelimit", str(exc))
+                self._post(self._schedule_backoff_fetch, self._backoff_s * 1000)
+            else:
+                log.error("Fetch failed: %s", exc)
+                new_status = "stale" if self.usage else "error"
+                self._post(self._apply_state, self.usage, new_status, str(exc))
+                # Back off on repeated errors to avoid hammering a failing API
+                self._backoff_s = min(self._backoff_s * 2, 900)
+                self._post(self._schedule_backoff_fetch, self._backoff_s * 1000)
 
     def _resolve_token(self) -> Optional[str]:
         """Token priority: override > cached > auto-discovered."""

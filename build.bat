@@ -17,6 +17,7 @@ python -m PyInstaller ^
     --hidden-import PIL.ImageFont ^
     --hidden-import PIL.ImageDraw ^
     --collect-all pystray ^
+    --add-data "claude_icon.png;." ^
     main.py
 
 echo.

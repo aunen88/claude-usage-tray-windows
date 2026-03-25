@@ -39,16 +39,16 @@ _FONT_CANDIDATES = [
     "C:/Windows/Fonts/arialbd.ttf",   # Arial Bold (last resort)
 ]
 
-_BG_DARK    = (26, 26, 26, 235)     # #1a1a1a - normal background
-_BG_GREY    = (75, 75, 75, 225)     # error/unknown background
-_BG_RELOGIN = (80, 0, 0, 235)       # dark-red relogin background
+_BG_DARK    = (15, 23, 42, 240)     # #0f172a - deep slate background
+_BG_GREY    = (30, 41, 59, 230)    # #1e293b - muted error background
+_BG_RELOGIN = (80, 10, 10, 240)    # dark-red relogin background
 
-_GREEN  = "#55EE55"
-_ORANGE = "#FFAA00"
-_RED    = "#FF5555"
-_GREY   = "#999999"
-_WHITE  = "#CCCCCC"
-_PINK   = "#FF8888"
+_GREEN  = "#4ade80"
+_ORANGE = "#f59e0b"
+_RED    = "#f87171"
+_GREY   = "#94a3b8"
+_WHITE  = "#cbd5e1"
+_PINK   = "#fca5a5"
 
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont:

@@ -164,8 +164,14 @@ def fetch_usage(token: str) -> UsageData:
         raise AuthError("HTTP 401 – token rejected. Re-login to Claude Code.")
 
     if resp.status_code == 429:
-        retry_after = int(resp.headers.get("retry-after", 300))
-        log.warning("Rate limited – API retry-after: %ds", retry_after)
+        raw_retry = resp.headers.get("retry-after", "300")
+        try:
+            retry_after = int(raw_retry)
+        except (ValueError, TypeError):
+            # retry-after may be an HTTP-date string — default to 5 min
+            retry_after = 300
+        retry_after = max(60, min(retry_after, 3600))  # clamp 60s–1h
+        log.warning("Rate limited – API retry-after: %ds (raw: %s)", retry_after, raw_retry)
         raise RateLimitError(
             f"Rate limited by API – retry in {retry_after}s.", retry_after
         )

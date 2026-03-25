@@ -35,9 +35,9 @@ def load_settings() -> Settings:
             raw = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
             valid = {k: v for k, v in raw.items() if k in Settings.__dataclass_fields__}
             s = Settings(**valid)
-            # Clamp refresh_interval to slider's max (600 s) in case an older
-            # settings.json contains a larger value.
-            s.refresh_interval = min(s.refresh_interval, 600)
+            # Clamp refresh_interval: minimum 120s to avoid API rate limits,
+            # maximum 600s (slider cap).
+            s.refresh_interval = max(120, min(s.refresh_interval, 600))
             return s
         except Exception:
             pass
